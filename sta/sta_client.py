@@ -25,6 +25,7 @@ projections = {}
 
 IDREGEX = re.compile(r'(?P<id>\(\d+\))')
 
+
 def make_st_time(ts):
     for fmt in ('%Y-%m-%d',):
         try:
@@ -55,6 +56,7 @@ def make_geometry_point_from_utm(e, n, zone=None, ellps=None, srid=None):
     lon, lat = p(e, n, inverse=True)
     return make_geometry_point_from_latlon(lat, lon)
 
+
 def make_geometry_point_from_latlon(lat, lon):
     return {'type': 'Point', 'coordinates': [lon, lat]}
 
@@ -64,7 +66,7 @@ class STAClient:
         self._host = host
         self._user = user
         self._pwd = pwd
-    
+
     def get_last_thing(self):
         pass
 
@@ -87,7 +89,7 @@ class STAClient:
         lid = self.get_location_id(name)
         if lid is None:
 
-            geometry =None
+            geometry = None
             if utm:
                 geometry = make_geometry_point_from_utm(*utm)
             elif latlon:
@@ -95,11 +97,11 @@ class STAClient:
 
             if geometry:
                 payload = {'name': name,
-                        'description': description,
-                        'properties': properties,
-                        'location': geometry,
-                        'encodingType': 'application/vnd.geo+json'
-                        }
+                           'description': description,
+                           'properties': properties,
+                           'location': geometry,
+                           'encodingType': 'application/vnd.geo+json'
+                           }
                 return self._add('Locations', payload)
             else:
                 logging.info('failed to construct geometry. need to specify utm or latlon')
@@ -110,35 +112,35 @@ class STAClient:
     def add_thing(self, name, description, properties, location_id):
         tid = self.get_thing_id(name, location_id)
         if tid is None:
-            payload = {'name': name, 
-                    'description': description, 
-                    # 'properties': properties, 
-                    'Locations': [{'@iot.id': location_id}]}
+            payload = {'name': name,
+                       'description': description,
+                       # 'properties': properties,
+                       'Locations': [{'@iot.id': location_id}]}
             return self._add('Things', payload)
-        
+
         return tid
-            
+
     def get_location_id(self, name):
         return self._get_id('Locations', name)
-        
+
     def get_thing_id(self, name, location_id=None):
-        tag='Things'
+        tag = 'Things'
         if location_id:
             tag = f'Locations({location_id})/{tag}'
-        
-        return self._get_id(tag,name)
-    
+
+        return self._get_id(tag, name)
+
     def _get_id(self, tag, name):
-        vs = self._get_item_by_name(tag, name)    
+        vs = self._get_item_by_name(tag, name)
         if vs:
             iotid = vs[0]['@iot.id']
             logging.info(f'Got tag={tag} name={name} iotid={iotid}')
             return iotid
-    
+
     def _get_item_by_name(self, tag, name):
         tag = f"{tag}?$filter=name eq '{name}'"
         url = self._make_url(tag)
-        resp = requests.get(url, auth=('read','read'))
+        resp = requests.get(url, auth=('read', 'read'))
         logging.info(f'Get item {tag} name={name}')
         return resp.json()['value']
 
@@ -147,21 +149,22 @@ class STAClient:
         logging.info(f'Add url={url}')
         logging.info(f'Add payload={payload}')
 
-        resp = requests.post(url, 
-            # auth=(self._user, self._pwd), 
-            json=payload)
+        resp = requests.post(url,
+                             # auth=(self._user, self._pwd),
+                             json=payload)
 
         if extract_iotid:
             m = IDREGEX.search(resp.headers.get('location', ''))
             # logging.info(f'Response={resp.json()}')
-                
+
             if m:
                 iotid = m.group('id')[1:-1]
             # else:
-                # iotid = resp.json()['@iot.id']
+            # iotid = resp.json()['@iot.id']
 
             logging.info(f'added {tag} {iotid}')
             return iotid
+
 
 class STAMQTTClient:
     def __init__(self, host):

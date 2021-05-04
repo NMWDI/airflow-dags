@@ -1,3 +1,18 @@
+# ===============================================================================
+# Copyright 2021 ross
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ===============================================================================
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.bigquery_hook import BigQueryHook
@@ -8,17 +23,16 @@ class BigQueryToXOperator(BaseOperator):
     ui_color = '#99ffcc'
 
     @apply_defaults
-    def __init__(
-            self,
-            sql=None,
-            keys=None,
-            bigquery_conn_id='bigquery_default',
-            delegate_to=None,
-            *args,
-            **kwargs):
-        super(BigQueryToXOperator, self).__init__(*args, **kwargs)
+    def __init__(self, sql=None, keys=None, sql_task_id=None,
+                 parameters=None,
+                 bigquery_conn_id='bigquery_default',
+                 delegate_to=None,
+                 *args, **kw):
+        super(BigQueryToXOperator, self).__init__(*args, **kw)
         self.sql = sql
-        self.keys = keys  # A list of keys for the columns in the result set of sql
+        self.keys = keys
+        self.parameters = parameters
+        self.sql_task_id = sql_task_id
         self.bigquery_conn_id = bigquery_conn_id
         self.delegate_to = delegate_to
 
@@ -43,8 +57,10 @@ class BigQueryToXOperator(BaseOperator):
                           use_legacy_sql=False)
         conn = bq.get_conn()
         cursor = conn.cursor()
-        sql, keys = self.sql, self.keys
+        sql, keys, params = self.sql, self.keys, self.parameters
         if sql is None:
-            sql, keys = ti.xcom_pull(task_ids='get-sql', key='return_value')
-        cursor.execute(sql)
+            sql, keys, params = ti.xcom_pull(task_ids=self.sql_task_id, key='return_value')
+
+        cursor.execute(sql, parameters=params)
         return cursor, keys
+# ============= EOF =============================================

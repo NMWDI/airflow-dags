@@ -62,10 +62,11 @@ def make_geometry_point_from_latlon(lat, lon):
 
 
 class STAClient:
-    def __init__(self, host, user, pwd):
+    def __init__(self, host, user, pwd, port):
         self._host = host
         self._user = user
         self._pwd = pwd
+        self._port = port
 
     def get_last_thing(self):
         pass
@@ -83,7 +84,7 @@ class STAClient:
             return vs[0].get('phenomenonTime')
 
     def _make_url(self, tag):
-        return f'http://{self._host}:8090/FROST-Server/v1.1/{tag}'
+        return f'http://{self._host}:{self._port}/FROST-Server/v1.1/{tag}'
 
     def add_location(self, name, description, properties, utm=None, latlon=None):
         lid = self.get_location_id(name)

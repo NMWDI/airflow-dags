@@ -17,15 +17,10 @@ import logging
 import datetime as dt
 
 from airflow import DAG
-from airflow.hooks.base_hook import BaseHook
-from airflow.models import TaskInstance
 from airflow.operators.python_operator import PythonOperator
 
+from util import make_sta_client, get_prev
 from operators.bq import BigQueryToXOperator
-from sta.sta_client import STAMQTTClient, make_st_time, STAClient
-
-DATASET_NAME = 'nmbgmr_sites'
-TABLE_NAME = 'SiteMetaData'
 
 default_args = {
     'owner': 'me',
@@ -38,22 +33,7 @@ default_args = {
 }
 
 
-def make_sta_client():
-    connection = BaseHook.get_connection("nmbgmr_sta_conn_id")
-    stac = STAClient(connection.host, connection.login, connection.password)
-    return stac
-
-
-def get_prev(context, task_id):
-    newdate = context['prev_execution_date']
-    logging.info(f'prevdate ={newdate}')
-    ti = TaskInstance(context['task'], newdate)
-    previous_max = ti.xcom_pull(task_ids=task_id, key='return_value', include_prior_dates=True)
-    logging.info(f'prev max {previous_max}')
-    return previous_max
-
-
-with DAG('SiteMetadata0.1',
+with DAG('CABQSiteMetadata0.1',
          schedule_interval='@hourly',
          catchup= False,
          default_args=default_args) as dag:
@@ -63,6 +43,10 @@ with DAG('SiteMetadata0.1',
 
         dataset_name = 'cabq_gwl'
         table_name = 'GWL'
+
+        # dataset = Variable.get('bg_locations')
+        # table_name = Variable.get('cabq_site_tbl')
+
         fs = ','.join(fields)
         sql = f'''select {fs} from {dataset_name}.{table_name}'''
 
@@ -81,20 +65,6 @@ with DAG('SiteMetadata0.1',
         logging.info(f'sql {sql}')
         logging.info(f'fields {fields}')
 
-        return sql, fields, {'leftbounds': previous_max_objectid}
-
-    def nmbgmr_get_sql(**context):
-        fields = ['Easting', 'PointID', 'AltDatum', 'Altitude', 'Northing', 'OBJECTID', 'SiteNames']
-        dataset = 'nmbgmr_sites'
-        table_name = 'SiteMetaData'
-        fs = ','.join(fields)
-        sql = f'''select {fs} from {dataset}.{table_name}'''
-
-        previous_max_objectid = get_prev(context, 'nmbgmr-etl')
-        if previous_max_objectid:
-            sql = f'{sql} where OBJECTID>%(leftbounds)s'
-
-        sql = f'{sql} order by OBJECTID LIMIT 100'
         return sql, fields, {'leftbounds': previous_max_objectid}
 
     def cabq_etl(**context):
@@ -126,42 +96,10 @@ with DAG('SiteMetadata0.1',
             return get_prev(context, 'cabq-etl')
 
 
-    def nmbgmr_etl(**context):
-        ti = context['ti']
-
-        data = ti.xcom_pull(task_ids='nmbgmr-get-sites', key='return_value')
-        stac = make_sta_client()
-
-        for record in data:
-            logging.info(record)
-            properties = {k: record[k] for k in ('Altitude', 'AltDatum')}
-
-            name = record['PointID']
-            description = 'No Description'
-            e = record['Easting']
-            n = record['Northing']
-            z = 13
-            logging.info(f'PointID={name}, Easting={e},Northing={n}')
-            lid = stac.add_location(name, description, properties, utm=(e, n, z))
-
-            name = 'Water Well'
-            description = 'No Description'
-            properties = {}
-            logging.info(f'Add thing to {lid}')
-            stac.add_thing(name, description, properties, lid)
-
-        return record['OBJECTID']
-
-
-    nmbgmr_get_sql = PythonOperator(task_id='nmbgmr-get-sql', python_callable=nmbgmr_get_sql)
-    nmbgmr_get_sites = BigQueryToXOperator(task_id='nmbgmr-get-sites', sql_task_id='nmbgmr-get-sql')
-    nmbgmr_etl = PythonOperator(task_id='nmbgmr-etl', python_callable=nmbgmr_etl)
-
     cabq_get_sql = PythonOperator(task_id='cabq-get-sql', python_callable=cabq_get_sql)
     cabq_get_sites = BigQueryToXOperator(task_id='cabq-get-sites', sql_task_id='cabq-get-sql')
     cabq_etl = PythonOperator(task_id='cabq-etl', python_callable=cabq_etl)
 
-    nmbgmr_get_sql >> nmbgmr_get_sites >> nmbgmr_etl
     cabq_get_sql >> cabq_get_sites >> cabq_etl
 
 # ============= EOF =============================================

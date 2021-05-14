@@ -18,7 +18,13 @@ import logging
 from airflow.hooks.base_hook import BaseHook
 from airflow.models import TaskInstance
 
-from sta.sta_client import STAClient
+from sta.sta_client import STAClient, STAMQTTClient
+
+
+def make_stamqtt_client():
+    connection = BaseHook.get_connection('nmbgmr_sta_conn_id')
+    staclient = STAMQTTClient(connection.host)
+    return staclient
 
 
 def make_sta_client():

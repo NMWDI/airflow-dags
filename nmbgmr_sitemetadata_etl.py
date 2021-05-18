@@ -23,9 +23,8 @@ from airflow.operators.python_operator import PythonOperator
 from util import get_prev, make_sta_client
 from operators.bq import BigQueryToXOperator
 
-
 default_args = {
-    'owner': 'me',
+    'owner': 'Jake Ross',
     'start_date': dt.datetime(2021, 5, 3),
     'retries': 0,
     'retry_delay': dt.timedelta(seconds=10),
@@ -34,12 +33,10 @@ default_args = {
 
 }
 
-
 with DAG('NMBGMRSiteMetadata0.1',
-         schedule_interval='@hourly',
-         catchup= False,
+         schedule_interval='@daily',
+         catchup=False,
          default_args=default_args) as dag:
-
     def nmbgmr_get_sql(**context):
         fields = ['Easting', 'PointID', 'AltDatum', 'Altitude', 'Northing', 'OBJECTID', 'SiteNames']
         dataset = Variable.get('bq_locations')
@@ -53,6 +50,7 @@ with DAG('NMBGMRSiteMetadata0.1',
 
         sql = f'{sql} order by OBJECTID LIMIT 100'
         return sql, fields, {'leftbounds': previous_max_objectid}
+
 
     def nmbgmr_etl(**context):
         ti = context['ti']

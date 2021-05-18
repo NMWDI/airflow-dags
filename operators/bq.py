@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ===============================================================================
+
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.bigquery_hook import BigQueryHook
@@ -24,7 +25,7 @@ class BigQueryToXOperator(BaseOperator):
 
     @apply_defaults
     def __init__(self, sql=None, keys=None, sql_task_id=None,
-                 parameters=None,
+                 parameters=None, handler=None,
                  bigquery_conn_id='bigquery_default',
                  delegate_to=None,
                  *args, **kw):
@@ -35,6 +36,7 @@ class BigQueryToXOperator(BaseOperator):
         self.sql_task_id = sql_task_id
         self.bigquery_conn_id = bigquery_conn_id
         self.delegate_to = delegate_to
+        self.handler = handler
 
     def execute(self, context):
         """
@@ -47,7 +49,10 @@ class BigQueryToXOperator(BaseOperator):
 
         #     # Do what you want with the row...
         #     handle_row(row_dict)
-        return [dict(zip(keys, row)) for row in cursor.fetchall()]
+        vs = [dict(zip(keys, row)) for row in cursor.fetchall()]
+        if self.handler:
+            vs = self.handler(vs)
+        return vs
 
     def _query_bigquery(self, ti):
         """
@@ -63,4 +68,6 @@ class BigQueryToXOperator(BaseOperator):
 
         cursor.execute(sql, parameters=params)
         return cursor, keys
+
+
 # ============= EOF =============================================

@@ -237,12 +237,9 @@ class STAMQTTClient:
         self._client = mqtt.Client('STA')
         self._client.connect(host)
 
-    def add_observations(self, datastream_id, records):
+    def add_observations(self, datastream_id, payloads):
         client = self._client
-        for r in records:
-            if r['dtw'] is not None:
-                payload = {'result': float(r['dtw']),
-                           'phenomenonTime': make_st_time(r['datemeasured'])}
-                client.publish(f'v1.0/Datastreams({datastream_id})/Observations',
-                               payload=json.dumps(payload))
+        for payload in payloads:
+            client.publish(f'v1.0/Datastreams({datastream_id})/Observations',
+                           payload=json.dumps(payload))
 # ============= EOF =============================================

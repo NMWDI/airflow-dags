@@ -142,9 +142,6 @@ class STAClient:
         if vs:
             return vs[0].get('phenomenonTime')
 
-    def _make_url(self, tag):
-        return f'http://{self._host}:{self._port}/FROST-Server/v1.1/{tag}'
-
     def add_location(self, name, description, properties, utm=None, latlon=None):
         lid = self.get_location_id(name)
         if lid is None:
@@ -180,6 +177,27 @@ class STAClient:
 
         return tid
 
+    def add_observations(self, datastream_id, components, obs):
+        n = 100
+        nobs = len(obs)
+        # logging.info('nobservations: {}'.format(nobs))
+        for i in range(0, nobs, n):
+            chunk = obs[i:i + n]
+            pd = self.observation_payload(datastream_id, components, chunk)
+            # logging.info('payload {}'.format(pd))
+            url = self._make_url('CreateObservations')
+            logging.info('url: {}'.format(url))
+            resp = requests.post(url,
+                                 # auth=('write', self._password),
+                                 json=pd)
+            # logging.info('response {}, {}'.format(i, resp))
+
+    def observation_payload(self, datastream_id, components, data):
+        obj = {'Datastream': {'@iot.id': datastream_id},
+               'components': components,
+               'dataArray': data}
+        return [obj]
+
     def get_location_id(self, name):
         return self._get_id('Locations', name)
 
@@ -196,24 +214,27 @@ class STAClient:
 
         return self._get_id(tag, name)
 
-    def _get_id(self, tag, name):
+    def _get_id(self, tag, name, verbose=False):
         vs = self._get_item_by_name(tag, name)
         if vs:
             iotid = vs[0]['@iot.id']
-            logging.info(f'Got tag={tag} name={name} iotid={iotid}')
+            if verbose:
+                logging.info(f'Got tag={tag} name={name} iotid={iotid}')
             return iotid
 
-    def _get_item_by_name(self, tag, name):
+    def _get_item_by_name(self, tag, name, verbose=False):
         tag = f"{tag}?$filter=name eq '{name}'"
         url = self._make_url(tag)
         resp = requests.get(url, auth=('read', 'read'))
-        logging.info(f'Get item {tag} name={name}')
+        if verbose:
+            logging.info(f'Get item {tag} name={name}')
         return resp.json()['value']
 
-    def _add(self, tag, payload, extract_iotid=True):
+    def _add(self, tag, payload, extract_iotid=True, verbose=False):
         url = self._make_url(tag)
-        logging.info(f'Add url={url}')
-        logging.info(f'Add payload={payload}')
+        if verbose:
+            logging.info(f'Add url={url}')
+            logging.info(f'Add payload={payload}')
 
         resp = requests.post(url,
                              # auth=(self._user, self._pwd),
@@ -225,11 +246,15 @@ class STAClient:
 
             if m:
                 iotid = m.group('id')[1:-1]
-                logging.info(f'added {tag} {iotid}')
+                if verbose:
+                    logging.info(f'added {tag} {iotid}')
                 return iotid
             else:
                 logging.info(f'failed adding {tag} {payload}')
                 logging.info(f'Response={resp.json()}')
+
+    def _make_url(self, tag):
+        return f'http://{self._host}:{self._port}/FROST-Server/v1.1/{tag}'
 
 
 class STAMQTTClient:

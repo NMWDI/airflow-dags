@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ===============================================================================
+import logging
 
 from airflow.models.baseoperator import BaseOperator
 from airflow.utils.decorators import apply_defaults
@@ -42,32 +43,49 @@ class BigQueryToXOperator(BaseOperator):
         """
         Run query and handle results row by row.
         """
-        cursor, keys = self._query_bigquery(context['ti'])
+        cursor, keys = self._get_context_cursor(context['ti'])
         # for row in cursor.fetchall():
         #     # Zip keys and row together because the cursor returns a list of list (not list of dicts)
         #     row_dict = dumps(dict(zip(self.keys,row))).encode('utf-8')
 
         #     # Do what you want with the row...
         #     handle_row(row_dict)
-        vs = [dict(zip(keys, row)) for row in cursor.fetchall()]
+        # vs = [dict(zip(keys, row)) for row in cursor.fetchall()]
+        vs = self._get_records(cursor, keys)
         if self.handler:
             vs = self.handler(vs)
         return vs
 
-    def _query_bigquery(self, ti):
+    def _get_context_cursor(self, ti):
         """
         Queries BigQuery and returns a cursor to the results.
         """
+
+        sql, keys, params = self.sql, self.keys, self.parameters
+        if sql is None:
+            args = ti.xcom_pull(task_ids=self.sql_task_id, key='return_value')
+            if args:
+                self.sql = sql = args[0]
+                self.keys = keys = args[1]
+                self.params = params = args[2]
+
+        cursor = self._execute_cursor(sql, params)
+        return cursor, keys
+
+    def _get_records(self, cursor, keys=None):
+        if keys is None:
+            keys = self.keys
+        return [dict(zip(keys, row)) for row in cursor.fetchall()]
+
+    def _execute_cursor(self, sql, params):
+        cursor = self._get_cursor()
+        logging.info(f'sql={sql}, params={params}')
+        cursor.execute(sql, parameters=params)
+        return cursor
+
+    def _get_cursor(self):
         bq = BigQueryHook(bigquery_conn_id=self.bigquery_conn_id,
                           use_legacy_sql=False)
         conn = bq.get_conn()
-        cursor = conn.cursor()
-        sql, keys, params = self.sql, self.keys, self.parameters
-        if sql is None:
-            sql, keys, params = ti.xcom_pull(task_ids=self.sql_task_id, key='return_value')
-
-        cursor.execute(sql, parameters=params)
-        return cursor, keys
-
-
+        return conn.cursor()
 # ============= EOF =============================================

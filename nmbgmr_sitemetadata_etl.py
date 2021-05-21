@@ -29,14 +29,17 @@ default_args = {
     'retries': 0,
     'retry_delay': dt.timedelta(seconds=10),
     'provide_context': True,
-    # 'depends_on_past': True,
+    'depends_on_past': True,
+    'wait_for_downstream': True
 
 }
 
-with DAG('NMBGMRSiteMetadata0.1',
+with DAG('NMBGMRSiteMetadata0.2',
          schedule_interval='@daily',
+         # schedule_interval='*/3 * * * *',
          catchup=False,
          default_args=default_args) as dag:
+
     def nmbgmr_get_sql(**context):
         fields = ['Easting', 'PointID', 'AltDatum', 'Altitude', 'Northing', 'OBJECTID', 'SiteNames']
         dataset = Variable.get('bq_locations')
@@ -45,11 +48,13 @@ with DAG('NMBGMRSiteMetadata0.1',
         sql = f'''select {fs} from {dataset}.{table_name}'''
 
         previous_max_objectid = get_prev(context, 'nmbgmr-etl')
+        wsql = f'{sql} where OBJECTID>%(leftbounds)s'
         if previous_max_objectid:
             sql = f'{sql} where OBJECTID>%(leftbounds)s'
 
-        sql = f'{sql} order by OBJECTID LIMIT 100'
-        return sql, fields, {'leftbounds': previous_max_objectid}
+        wsql = f'{wsql} order by OBJECTID LIMIT 300'
+        sql = f'{sql} order by OBJECTID LIMIT 300'
+        return sql, fields, {'leftbounds': previous_max_objectid}, wsql
 
 
     def nmbgmr_etl(**context):
@@ -63,7 +68,7 @@ with DAG('NMBGMRSiteMetadata0.1',
                 logging.info(record)
                 properties = {k: record[k] for k in ('Altitude', 'AltDatum')}
 
-                name = record['PointID']
+                name = record['PointID'].upper()
                 description = 'No Description'
                 e = record['Easting']
                 n = record['Northing']

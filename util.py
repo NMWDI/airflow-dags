@@ -27,8 +27,8 @@ def make_stamqtt_client():
     return staclient
 
 
-def make_sta_client():
-    connection = BaseHook.get_connection("nmbgmr_sta_conn_id")
+def make_sta_client(sta_key='nmbgmr_sta_conn_id'):
+    connection = BaseHook.get_connection(sta_key)
     stac = STAClient(connection.host, connection.login, connection.password,
                      connection.port)
     return stac
@@ -42,4 +42,9 @@ def get_prev(context, task_id):
     logging.info(f'prev max {previous_max}')
     return previous_max
 
+
+GWL_DATASTREAM = 'Groundwater Levels'
+GWL_DESCRIPTION = 'Measurement of groundwater depth in a water well, as measured below ground surface'
+WATER_WELL = 'Water Well'
+BGS_OBSERVED_PROPERTY = ('Depth to Water Below Ground Surface', 'depth to water below ground surface')
 # ============= EOF =============================================

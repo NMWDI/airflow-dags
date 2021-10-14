@@ -29,7 +29,7 @@ IDREGEX = re.compile(r'(?P<id>\(\d+\))')
 
 
 def make_st_time(ts):
-    for fmt in ('%Y-%m-%d',):
+    for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%S'):
         try:
             t = datetime.strptime(ts, fmt)
             return f'{t.isoformat()}.000Z'
@@ -91,14 +91,25 @@ class STAClient:
             payload = {'name': name,
                        'description': description,
                        'encodingType': 'application/pdf',
-                       'metadata': 'Not Metadata'
+                       'metadata': 'No Metadata'
                        }
             sensor_id = self._add('Sensors', payload)
 
         return sensor_id
 
-    def add_datastream(self, datastream_name, thing_id, obsprop_id, sensor_id,
+    def add_datastream(self, args, thing_id, obsprop_id, sensor_id,
                        unit=None, otype=None):
+        properties = None
+        description = 'No Description'
+        if isinstance(args, str):
+            datastream_name = args
+        elif isinstance(args, dict):
+            datastream_name = args['name']
+            properties = args['properties']
+            description = args['description']
+        else:
+            datastream_name, properties = args
+
         if unit is None:
             unit = FOOT
         if otype is None:
@@ -109,8 +120,11 @@ class STAClient:
                    'Sensor': iotid(sensor_id),
                    'unitOfMeasurement': unit,
                    'observationType': otype,
-                   'description': 'No Description',
+                   'description': description,
                    'name': datastream_name}
+
+        if properties:
+            payload['properties'] = properties
 
         return self._add('Datastreams', payload)
 
@@ -120,11 +134,11 @@ class STAClient:
     def get_observed_property(self, name):
         return self._get_id('ObservedProperties', name)
 
-    def get_datastream(self, pointid, thing_name, datastream_name):
+    def get_datastream(self, pointid, thing_name, datastream_name, sensor_name):
         location_id = self._get_id('Locations', pointid)
         if location_id:
             thing_id = self.get_thing_id(thing_name, location_id)
-            datastream_id = self.get_datastream_id(datastream_name, thing_id)
+            datastream_id = self.get_datastream_id(datastream_name, sensor_name, thing_id)
             return datastream_id
 
     def get_last_thing(self):
@@ -142,7 +156,22 @@ class STAClient:
         if vs:
             return vs[0].get('phenomenonTime')
 
-    def add_location(self, name, description, properties, utm=None, latlon=None):
+    def patch(self, url, payload):
+        resp = requests.patch(url,
+                              auth=(self._user, self._pwd),
+                              json=payload)
+        if resp.status_code != 200:
+            logging.info(resp, resp.text)
+
+    def patch_thing(self, iotid, payload):
+        url = self._make_url(f'Things({iotid})')
+        self.patch(url, payload)
+
+    def patch_location(self, iotid, payload):
+        url = self._make_url(f'Locations({iotid})')
+        self.patch(url, payload)
+
+    def add_location(self, name, description, properties, utm=None, latlon=None, verbose=False):
         lid = self.get_location_id(name)
         if lid is None:
 
@@ -159,22 +188,27 @@ class STAClient:
                            'location': geometry,
                            'encodingType': 'application/vnd.geo+json'
                            }
-                return self._add('Locations', payload)
+                return self._add('Locations', payload, verbose=verbose), True
             else:
                 logging.info('failed to construct geometry. need to specify utm or latlon')
                 raise Exception
         else:
-            return lid
+            self.patch_location(lid, {'properties': properties, 'description': description})
+            return lid, False
 
-    def add_thing(self, name, description, properties, location_id):
-        tid = self.get_thing_id(name, location_id)
+    def add_thing(self, name, description, properties, location_id, check=True, verbose=False):
+        tid = None
+        if check:
+            tid = self.get_thing_id(name, location_id)
+
         if tid is None:
             payload = {'name': name,
                        'description': description,
-                       # 'properties': properties,
+                       'properties': properties,
                        'Locations': [{'@iot.id': location_id}]}
-            return self._add('Things', payload)
-
+            return self._add('Things', payload, verbose=verbose)
+        else:
+            self.patch_thing(tid, {'properties': properties, 'description': description})
         return tid
 
     def add_observations(self, datastream_id, components, obs):
@@ -188,9 +222,9 @@ class STAClient:
             url = self._make_url('CreateObservations')
             logging.info('url: {}'.format(url))
             resp = requests.post(url,
-                                 # auth=('write', self._password),
+                                 auth=('write', self._pwd),
                                  json=pd)
-            # logging.info('response {}, {}'.format(i, resp))
+            logging.info('response {}, {}'.format(i, resp))
 
     def observation_payload(self, datastream_id, components, data):
         obj = {'Datastream': {'@iot.id': datastream_id},
@@ -201,11 +235,12 @@ class STAClient:
     def get_location_id(self, name):
         return self._get_id('Locations', name)
 
-    def get_datastream_id(self, name, thing_id):
+    def get_datastream_id(self, name, sensor_name, thing_id):
         tag = 'Datastreams'
         if thing_id:
             tag = f'Things({thing_id})/{tag}'
-        return self._get_id(tag, name)
+
+        return self._get_id(tag, name, extra_args=f'$filter=Sensor/name eq \'{sensor_name}\'')
 
     def get_thing_id(self, name, location_id=None):
         tag = 'Things'
@@ -214,30 +249,37 @@ class STAClient:
 
         return self._get_id(tag, name)
 
-    def _get_id(self, tag, name, verbose=False):
-        vs = self._get_item_by_name(tag, name)
+    def _get_id(self, tag, name, verbose=False, **kw):
+        vs = self._get_item_by_name(tag, name, **kw)
         if vs:
             iotid = vs[0]['@iot.id']
             if verbose:
                 logging.info(f'Got tag={tag} name={name} iotid={iotid}')
             return iotid
 
-    def _get_item_by_name(self, tag, name, verbose=False):
+    def _get_item_by_name(self, tag, name, extra_args=None, verbose=False):
         tag = f"{tag}?$filter=name eq '{name}'"
+        if extra_args:
+            tag = f'{tag}&{extra_args}'
         url = self._make_url(tag)
         resp = requests.get(url, auth=('read', 'read'))
         if verbose:
             logging.info(f'Get item {tag} name={name}')
-        return resp.json()['value']
 
-    def _add(self, tag, payload, extract_iotid=True, verbose=False):
+        j = resp.json()
+        try:
+            return j['value']
+        except KeyError:
+            pass
+
+    def _add(self, tag, payload, extract_iotid=True, verbose=True):
         url = self._make_url(tag)
         if verbose:
             logging.info(f'Add url={url}')
             logging.info(f'Add payload={payload}')
 
         resp = requests.post(url,
-                             # auth=(self._user, self._pwd),
+                             auth=(self._user, self._pwd),
                              json=payload)
 
         if extract_iotid:
@@ -254,7 +296,13 @@ class STAClient:
                 logging.info(f'Response={resp.json()}')
 
     def _make_url(self, tag):
-        return f'http://{self._host}:{self._port}/FROST-Server/v1.1/{tag}'
+        port = self._port
+        if not port or port == 80:
+            port = ''
+        else:
+            port = f':{port}'
+
+        return f'http://{self._host}{port}/FROST-Server/v1.1/{tag}'
 
 
 class STAMQTTClient:

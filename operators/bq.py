@@ -20,6 +20,52 @@ from airflow.utils.decorators import apply_defaults
 from airflow.contrib.hooks.bigquery_hook import BigQueryHook
 
 
+class BigQueryBaseOperator(BaseOperator):
+    ui_color = '#9fff3c'
+
+    @apply_defaults
+    def __init__(self, bigquery_conn_id='bigquery_default', *args, **kw):
+        super(BigQueryBaseOperator, self).__init__(*args, **kw)
+        self.bigquery_conn_id = bigquery_conn_id
+
+    def execute(self, context):
+        """
+        Run query and handle results row by row.
+        """
+        # cursor, keys = self._get_context_cursor(context['ti'])
+        # for row in cursor.fetchall():
+        #     # Zip keys and row together because the cursor returns a list of list (not list of dicts)
+        #     row_dict = dumps(dict(zip(self.keys,row))).encode('utf-8')
+
+        #     # Do what you want with the row...
+        #     handle_row(row_dict)
+        return self._handle_execute(context)
+        # keys = [d[0] for d in cursor.description]
+        # vs = [dict(zip(keys, row)) for row in cursor.fetchall()]
+        # self._handle(vs)
+
+    def _handle_execute(self, cursor):
+        raise NotImplementedError
+
+    def _get_cursor(self):
+        bq = BigQueryHook(bigquery_conn_id=self.bigquery_conn_id,
+                          use_legacy_sql=False)
+        conn = bq.get_conn()
+        return conn.cursor()
+
+    def _execute_cursor(self, context, sql=None, params=None):
+        if sql is None:
+            sql = self.sql
+        if params is None:
+            params = self.params
+
+        cursor = self._get_cursor()
+        logging.info(f'sql={sql}, params={params}')
+        cursor.execute(sql, parameters=params)
+
+        return cursor
+
+
 class BigQueryToXOperator(BaseOperator):
     template_fields = ['sql']
     ui_color = '#99ffcc'

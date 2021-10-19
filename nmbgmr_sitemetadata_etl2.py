@@ -87,7 +87,7 @@ def make_screens(cursor, objectid):
     return screens
 
 
-with DAG('NMBGMR_WELL_LOCATION_THINGS_0.2.5',
+with DAG('NMBGMR_WELL_LOCATION_THINGS_0.3.0',
          # schedule_interval='@daily',
          # schedule_interval='*/7 * * * *',
          schedule_interval='0 */12 * * *',
@@ -139,6 +139,7 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.2.5',
             logging.info(record)
             properties = {k: record[k] for k in ('Altitude', 'AltDatum')}
             properties['agency'] = 'NMBGMR'
+            properties['source_id'] = record['OBJECTID']
             name = record['PointID'].upper()
             description = 'Location of well where measurements are made'
             e = record['Easting']
@@ -149,6 +150,7 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.2.5',
             lid, added = stac.add_location(name, description, properties, utm=(e, n, z))
             logging.info(f'added location {lid} {time.time() - st}')
             properties['geoconnex'] = f'https://geoconnex.us/nmwdi/st/locations/{lid}'
+
             stac.patch_location(lid, {'properties': properties})
 
             name = 'Water Well'
@@ -160,7 +162,8 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.2.5',
                           'Use': record['CurrentUseDescription'],
                           'Status': record['StatusDescription'],
                           'Screens': screens.get(record['PointID'], []),
-                          'agency': 'NMBGMR'}
+                          'agency': 'NMBGMR',
+                          'source_id': record['OBJECTID']}
             # logging.info(f'Add thing to {lid}')
             st = time.time()
             stac.add_thing(name, description, properties, lid)
@@ -177,7 +180,44 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.2.5',
 
         return previous_max_objectid
 
+    def cleanup(**context):
+        """
+        get all locations from source and destination
+        :param context:
+        :return:
+        """
+        bq = BigQueryHook()
+        conn = bq.get_conn()
+        cursor = conn.cursor()
+
+        dataset = Variable.get('bq_locations')
+        table_name = Variable.get('nmbgmr_site_tbl')
+        delete_enabled = bool(int(Variable.get('st_delete_enabled', default_var=0)))
+
+        sql = f'select OBJECTID, PointID from {dataset}.{table_name}'
+        cursor.execute(sql)
+        src = cursor.fetchall()
+
+        logging.info(f'src len={len(src)}')
+        stac = make_sta_client()
+        dst = stac.get_locations(fs="properties/agency eq 'NMBGMR'", orderby='id asc')
+        logging.info(f'dst len={len(dst)}')
+        deleted = []
+        for l in dst:
+            logging.info(f'checking {l}')
+            if not next((s for s in src if s[1] == l['name']), None):
+                logging.info(f'****** Requires removal {l}')
+                if delete_enabled:
+                    if stac.delete_location(l['@iot.id']):
+                        deleted.append((l['@iot.id'], l))
+
+        logging.info('Deleted ============================')
+        for d in deleted:
+            logging.info(d)
+        logging.info('====================================')
 
     nmbgmr_etl = PythonOperator(task_id='nmbgmr-etl', python_callable=nmbgmr_etl)
+    cleanup = PythonOperator(task_id='cleanup', python_callable=cleanup)
 
+    nmbgmr_etl >> cleanup
 # ============= EOF =============================================

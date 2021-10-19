@@ -28,6 +28,26 @@ projections = {}
 IDREGEX = re.compile(r'(?P<id>\(\d+\))')
 
 
+def get_items(start_url):
+    items = []
+
+    def rget(url):
+        resp = requests.get(url)
+        data = resp.json()
+        values = data['value']
+        logging.info('url={}, nvalues={}'.format(url, len(values)))
+
+        items.extend(values)
+        try:
+            next_url = data['@iot.nextLink']
+        except KeyError:
+            return
+        rget(next_url)
+
+    rget(start_url)
+    return items
+
+
 def make_st_time(ts):
     for fmt in ('%Y-%m-%d', '%Y-%m-%dT%H:%M:%S'):
         try:
@@ -73,6 +93,26 @@ class STAClient:
         self._user = user
         self._pwd = pwd
         self._port = port
+
+    def get_locations(self, fs=None, orderby=None):
+        params = []
+        base = 'Locations'
+        if fs:
+            params.append(f'$filter={fs}')
+        if orderby:
+            params.append(f'$orderby={orderby}')
+
+        if params:
+            params = '&'.join(params)
+            base = f'{base}?{params}'
+
+        url = self._make_url(base)
+
+        return get_items(url)
+
+    def delete_location(self, iotid):
+        url = self._make_url(f'Locations({iotid})')
+        return self.delete(url)
 
     def add_observed_property(self, name, description, **kw):
         obsprop_id = self.get_observed_property(name)
@@ -155,6 +195,14 @@ class STAClient:
         logging.info(f'vs {vs}')
         if vs:
             return vs[0].get('phenomenonTime')
+
+    def delete(self, url):
+        resp = requests.delete(url,
+                               auth=(self._user, self._pwd))
+        if resp.status_code != 200:
+            logging.info(resp, resp.text)
+        else:
+            return True
 
     def patch(self, url, payload):
         resp = requests.patch(url,

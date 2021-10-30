@@ -15,13 +15,11 @@
 # ===============================================================================
 import logging
 import datetime
-from operator import itemgetter
 
 from airflow import DAG
 from airflow.models import Variable
-from airflow.operators.python_operator import PythonOperator
 
-from bq_etl_levels import default_args
+from dags.zobs.bq_etl_levels import default_args
 from operators.bq import BigQueryBaseOperator
 from util import get_prev, make_sta_client
 

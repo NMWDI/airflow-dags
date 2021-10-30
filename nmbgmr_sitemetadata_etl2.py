@@ -25,7 +25,7 @@ from airflow.contrib.hooks.bigquery_hook import BigQueryHook
 from airflow.models import Variable
 from airflow.operators.python_operator import PythonOperator
 
-from util import get_prev, make_sta_client
+from util import get_prev, make_sta_client, make_total_records
 from operators.bq import BigQueryToXOperator
 
 default_args = {
@@ -38,19 +38,6 @@ default_args = {
     'wait_for_downstream': True
 
 }
-
-
-def make_total_records(cursor):
-    cursor.flush_results()
-    dataset = Variable.get('bq_locations')
-    # table_name = Variable.get('nmbgmr_screen_tbl')
-    table_name = Variable.get('nmbgmr_site_tbl')
-
-    sql = f'''SELECT count(*) from {dataset}.{table_name}'''
-    cursor.execute(sql)
-    cnt = int(cursor.fetchone()[0])
-    cursor.flush_results()
-    return cnt
 
 
 def make_screens(cursor, objectid):
@@ -87,10 +74,10 @@ def make_screens(cursor, objectid):
     return screens
 
 
-with DAG('NMBGMR_WELL_LOCATION_THINGS_0.3.0',
+with DAG('NMBGMR_WELL_LOCATION_THINGS_0.4.0',
          # schedule_interval='@daily',
          # schedule_interval='*/7 * * * *',
-         schedule_interval='0 */12 * * *',
+         schedule_interval='0 0 * * *',
          catchup=False,
          default_args=default_args) as dag:
     def nmbgmr_etl(**context):
@@ -118,7 +105,7 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.3.0',
         screens = make_screens(cursor, previous_max_objectid)
         logging.info(f'got screens {len(screens)} {time.time() - st}')
 
-        total_records = make_total_records(cursor)
+        total_records = make_total_records(cursor, dataset, table_name)
         logging.info(f'total records={total_records}, limit={limit}')
         # data = cursor.fetchall()
         if limit > total_records:
@@ -140,6 +127,8 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.3.0',
             properties = {k: record[k] for k in ('Altitude', 'AltDatum')}
             properties['agency'] = 'NMBGMR'
             properties['source_id'] = record['OBJECTID']
+            properties['PointID'] = record['PointID']
+            properties['WellID'] = record['WellID']
             name = record['PointID'].upper()
             description = 'Location of well where measurements are made'
             e = record['Easting']
@@ -163,6 +152,8 @@ with DAG('NMBGMR_WELL_LOCATION_THINGS_0.3.0',
                           'Status': record['StatusDescription'],
                           'Screens': screens.get(record['PointID'], []),
                           'agency': 'NMBGMR',
+                          'PointID': record['PointID'],
+                          'WellID': record['WellID'],
                           'source_id': record['OBJECTID']}
             # logging.info(f'Add thing to {lid}')
             st = time.time()
